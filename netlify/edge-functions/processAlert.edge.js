@@ -1,5 +1,5 @@
 // Netlify Edge Function for processing TradingView alerts
-import { createClient } from 'npm:@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import { executeBybitOrder } from './utils/bybit.edge.mjs';
 
 // CORS headers to include in all responses
