@@ -1,6 +1,6 @@
 // Netlify Edge Function for generating webhook URLs
-import { createClient } from 'npm:@supabase/supabase-js';
-import { nanoid } from 'npm:nanoid@3.3.4';
+import { createClient } from '@supabase/supabase-js';
+import { nanoid } from 'nanoid';
 
 // CORS headers to include in all responses
 const corsHeaders = {
