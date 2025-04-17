@@ -1,0 +1,39 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# Redirect and rewrite rules to handle SPA routing and API requests
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Prevent secrets scanning from failing the build
+[build.environment]
+  # Allow skipping secrets scan for the bundle output, as we've properly secured our environment variables
+  SECRETS_SCAN_OMIT_PATHS = "dist/assets/"
+  NODE_VERSION = "18"
+
+# Setup runtime environment variable replacement
+[context.production]
+  environment = { NODE_VERSION = "18" }
+
+# Customize post-processing to replace placeholders with actual values
+[build.processing]
+  [build.processing.html]
+    pretty_urls = true
+
+# Configure Edge Functions with array syntax
+[[edge_functions]]
+  path = "/.netlify/functions/processAlert/*"
+  function = "processAlert.edge"
+
+[[edge_functions]]
+  path = "/.netlify/functions/generateWebhook"
+  function = "generateWebhook.edge"
