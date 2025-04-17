@@ -1,6 +1,6 @@
 // Netlify Edge Function for processing TradingView alerts
 import { createClient } from '@supabase/supabase-js';
-import { executeBybitOrder } from './utils/bybit.edge.mjs';
+import { executeBybitOrder, MAINNET_URL, TESTNET_URL } from './utils/bybit.edge.mjs';
 
 // CORS headers to include in all responses
 const corsHeaders = {
@@ -40,8 +40,8 @@ export default async function handler(request, context) {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_KEY');
   
-  console.log(`Environment check: Supabase URL exists: ${!!supabaseUrl}, Service Key exists: ${!!supabaseServiceKey}`);
-
+  console.log(`Environment check: SUPABASE_URL=${!!supabaseUrl}, SERVICE_KEY=${!!supabaseServiceKey}`);
+  
   // Check if environment variables are set
   if (!supabaseUrl || !supabaseServiceKey) {
     console.error("Missing Supabase environment variables");
@@ -64,13 +64,12 @@ export default async function handler(request, context) {
   try {
     // Get webhook token from URL path
     const url = new URL(request.url);
-    const pathParts = url.pathname.split('/');
-    const webhookToken = pathParts[pathParts.length - 1];
+    const parts = url.pathname.split('/');
+    const webhookToken = parts[parts.length - 1];
     
-    console.log(`Processing request for webhook token: ${webhookToken}`);
-    
+    console.log(`Processing webhook token: ${webhookToken}`);
+
     // Verify webhook token exists and is not expired
-    console.log("Verifying webhook token...");
     const { data: webhook, error: webhookError } = await supabase
       .from('webhooks')
       .select('*, bots(*)')
@@ -79,7 +78,7 @@ export default async function handler(request, context) {
       .single();
     
     if (webhookError || !webhook) {
-      console.error("Invalid or expired webhook:", webhookError);
+      console.error("Invalid/expired webhook:", webhookError);
       return new Response(
         JSON.stringify({ error: 'Invalid or expired webhook' }),
         {
@@ -91,27 +90,18 @@ export default async function handler(request, context) {
         }
       );
     }
-    
-    console.log(`Webhook found for user_id: ${webhook.user_id}, bot_id: ${webhook.bot_id}`);
-    
-    // Parse TradingView alert data
-    console.log("Parsing alert data...");
-    let alertData;
-    try {
-      alertData = await request.json();
-    } catch (e) {
-      console.error("Error parsing JSON from alert data:", e);
-      alertData = {};
+
+    // Parse alert payload
+    let alertData = {};
+    try { 
+      alertData = await request.json(); 
     }
-    
-    console.log("Alert data received:", JSON.stringify(alertData));
-    
-    // Get bot configuration
+    catch (e) { 
+      console.error("Alert JSON parse error:", e); 
+    }
+
+    // Load bot config + API key
     const bot = webhook.bots;
-    console.log(`Bot configuration retrieved: ${bot.name}, symbol: ${bot.symbol}, test_mode: ${bot.test_mode}`);
-    
-    // Get API credentials for the user
-    console.log("Fetching API credentials...");
     const { data: apiKey, error: apiKeyError } = await supabase
       .from('api_keys')
       .select('*')
@@ -120,7 +110,7 @@ export default async function handler(request, context) {
       .single();
     
     if (apiKeyError || !apiKey) {
-      console.error("API credentials not found:", apiKeyError);
+      console.error("API key not found:", apiKeyError);
       return new Response(
         JSON.stringify({ error: 'API credentials not found' }),
         {
@@ -132,28 +122,54 @@ export default async function handler(request, context) {
         }
       );
     }
-    
-    console.log("API credentials found");
-    
-    // Prepare order parameters - Using bot.test_mode only
+
+    // ─────── MIN QTY FETCH & ROUND ───────
+    const symbol = (alertData.symbol || bot.symbol || '').toUpperCase();
+    const baseUrl = bot.test_mode ? TESTNET_URL : MAINNET_URL;
+    // fetch instrument info
+    const infoRes = await fetch(
+      `${baseUrl}/v5/market/instruments-info?symbol=${symbol}&category=linear`
+    );
+    const infoJson = await infoRes.json();
+    if (infoJson.retCode !== 0) {
+      throw new Error(`InstrumentsInfo error: ${infoJson.retMsg}`);
+    }
+    const inst = infoJson.result.list[0];
+    const lotFilter = inst.lotSizeFilter;
+    const minQtyStr = lotFilter.minOrderQty ?? lotFilter.minTrdAmt;
+    const stepStr = lotFilter.qtyStep ?? lotFilter.stepSize;
+    const minQty = parseFloat(minQtyStr);
+    const step = parseFloat(stepStr);
+    const decimals = stepStr.includes('.') ? stepStr.split('.')[1].length : 0;
+    const rawQty = parseFloat(alertData.quantity ?? bot.default_quantity ?? 0);
+    let qty = rawQty < minQty
+      ? minQty
+      : Math.floor(rawQty / step) * step;
+    if (qty < minQty) qty = minQty;
+    const adjustedQty = parseFloat(qty.toFixed(decimals));
+    console.log(
+      `Adjusted quantity from ${rawQty} → ${adjustedQty}` +
+      ` (minQty=${minQty}, step=${step})`
+    );
+
+    // ─────── BUILD ORDER PARAMS ───────
     const orderParams = {
       apiKey: apiKey.api_key,
       apiSecret: apiKey.api_secret,
-      symbol: (alertData.symbol || bot.symbol || '').toUpperCase(), // Ensure uppercase for Bybit
+      symbol,
       side: alertData.side || bot.default_side || 'Buy',
       orderType: alertData.orderType || bot.default_order_type || 'Market',
-      quantity: alertData.quantity || bot.default_quantity || 0.001,
+      quantity: adjustedQty,
       price: alertData.price,
       stopLoss: alertData.stopLoss || bot.default_stop_loss,
       takeProfit: alertData.takeProfit || bot.default_take_profit,
-      testnet: bot.test_mode // Using only bot.test_mode
+      testnet: bot.test_mode
     };
     
-    console.log("Order parameters prepared:", JSON.stringify({
-      ...orderParams,
-      apiKey: "REDACTED",
-      apiSecret: "REDACTED"
-    }));
+    console.log(
+      "Order parameters prepared:",
+      JSON.stringify({ ...orderParams, apiKey: "REDACTED", apiSecret: "REDACTED" })
+    );
     
     let orderResult;
     
