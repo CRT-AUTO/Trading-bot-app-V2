@@ -9,14 +9,21 @@
   to = "/.netlify/functions/:splat"
   status = 200
 
+# Ensure edge functions take precedence
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# Fallback for SPA routing (only for non-API paths)
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+  conditions = { "Path" = ["!/api/*", "!/.netlify/functions/*"] }
 
 # Prevent secrets scanning from failing the build
 [build.environment]
-  # Allow skipping secrets scan for the bundle output, as we've properly secured our environment variables
   SECRETS_SCAN_OMIT_PATHS = "dist/assets/"
   NODE_VERSION = "18"
 
@@ -29,11 +36,19 @@
   [build.processing.html]
     pretty_urls = true
 
-# Configure Edge Functions with array syntax
+# Configure Edge Functions
 [[edge_functions]]
-  path = "/.netlify/functions/processAlert/*"
+  path = "/.netlify/functions/processAlert"
   function = "processAlert.edge"
 
 [[edge_functions]]
   path = "/.netlify/functions/generateWebhook"
   function = "generateWebhook.edge"
+
+# Add CORS headers to allow TradingView requests
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "POST"
+    Access-Control-Allow-Headers = "Content-Type"
