@@ -2,7 +2,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { executeBybitOrder, MAINNET_URL, TESTNET_URL } from './utils/bybit.edge.mjs';
 
-// CORS headers to include in all responses
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -11,7 +10,18 @@ const corsHeaders = {
 
 export default async function handler(request, context) {
   console.log("Edge Function: processAlert started");
-  
+
+  // Log request method and URL
+  console.log('[processAlert.edge] Request method:', request.method);
+  console.log('[processAlert.edge] Request URL:', request.url);
+
+  // Log headers
+  const headers = {};
+  for (const [key, value] of request.headers.entries()) {
+    headers[key] = value;
+  }
+  console.log('[processAlert.edge] Request headers:', headers);
+
   // Handle preflight requests
   if (request.method === "OPTIONS") {
     console.log("Handling preflight request");
@@ -42,7 +52,6 @@ export default async function handler(request, context) {
   
   console.log(`Environment check: SUPABASE_URL=${!!supabaseUrl}, SERVICE_KEY=${!!supabaseServiceKey}`);
   
-  // Check if environment variables are set
   if (!supabaseUrl || !supabaseServiceKey) {
     console.error("Missing Supabase environment variables");
     return new Response(
@@ -69,7 +78,7 @@ export default async function handler(request, context) {
     
     console.log(`Processing webhook token: ${webhookToken}`);
 
-    // Verify webhook token exists and is not expired
+    // Verify webhook token
     const { data: webhook, error: webhookError } = await supabase
       .from('webhooks')
       .select('*, bots(*)')
@@ -91,13 +100,43 @@ export default async function handler(request, context) {
       );
     }
 
-    // Parse alert payload
-    let alertData = {};
-    try { 
-      alertData = await request.json(); 
+    // Log raw body
+    const body = await request.text();
+    console.log('[processAlert.edge] Raw request body:', JSON.stringify(body));
+
+    // Check content type
+    const contentType = headers['content-type'] || 'not specified';
+    if (!contentType.includes('application/json')) {
+      console.error('[processAlert.edge] Invalid content type:', contentType);
+      return new Response(
+        JSON.stringify({ error: 'Expected JSON content type', headers, rawBody: body }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
     }
-    catch (e) { 
-      console.error("Alert JSON parse error:", e); 
+
+    // Parse alert payload
+    let alertData;
+    try { 
+      alertData = JSON.parse(body);
+      console.log('[processAlert.edge] Parsed alert data:', alertData);
+    } catch (e) { 
+      console.error("Alert JSON parse error:", e.message);
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON payload', rawBody: body, headers }),
+        {
+          status: 400,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json"
+          }
+        }
+      );
     }
 
     // Load bot config + API key
@@ -126,7 +165,6 @@ export default async function handler(request, context) {
     // ─────── MIN QTY FETCH & ROUND ───────
     const symbol = (alertData.symbol || bot.symbol || '').toUpperCase();
     const baseUrl = bot.test_mode ? TESTNET_URL : MAINNET_URL;
-    // fetch instrument info
     const infoRes = await fetch(
       `${baseUrl}/v5/market/instruments-info?symbol=${symbol}&category=linear`
     );
@@ -173,10 +211,8 @@ export default async function handler(request, context) {
     
     let orderResult;
     
-    // Check if in test mode
     if (bot.test_mode) {
       console.log("Test mode enabled, simulating order execution");
-      // Simulate order execution
       orderResult = {
         orderId: `test-${Date.now()}`,
         symbol: orderParams.symbol,
@@ -188,7 +224,6 @@ export default async function handler(request, context) {
       };
     } else {
       console.log("Executing actual order on Bybit");
-      // Execute actual order
       orderResult = await executeBybitOrder(orderParams);
     }
     
