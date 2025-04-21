@@ -2,7 +2,7 @@
 // Uses Web Fetch API and Web Crypto API instead of axios and node:crypto
 
 // Base URLs - use alternative domain to avoid geo-blocks
-export const MAINNET_URL = 'https://api.byhkbit.com';
+export const MAINNET_URL = 'https://api.bybit.com';
 export const TESTNET_URL = 'https://api-testnet.bybit.com';
 const DEFAULT_RECV_WINDOW = '5000';
 
