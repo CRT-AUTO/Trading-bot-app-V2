@@ -16,7 +16,6 @@
 
 # Prevent secrets scanning from failing the build
 [build.environment]
-  # Allow skipping secrets scan for the bundle output, as we've properly secured our environment variables
   SECRETS_SCAN_OMIT_PATHS = "dist/assets/"
   NODE_VERSION = "18"
 
@@ -37,3 +36,11 @@
 [[edge_functions]]
   path = "/.netlify/functions/generateWebhook"
   function = "generateWebhook.edge"
+
+# Add CORS headers to allow TradingView requests
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "POST"
+    Access-Control-Allow-Headers = "Content-Type"
